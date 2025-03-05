@@ -432,6 +432,92 @@ class ModelTreeViewer(App):
         except Exception as e:
             return f"[red]<Error formatting value: {str(e)}>[/red]"
     
+    def is_simple_type(self, value):
+        """Check if a value is a simple type (should be a leaf node)"""
+        return (value is None or 
+                isinstance(value, (bool, int, float, str)) or
+                (isinstance(value, (list, tuple)) and len(value) == 0) or
+                (isinstance(value, dict) and len(value) == 0))
+    
+    def add_attributes_to_node(self, parent_node, obj, max_depth=3, current_depth=0):
+        """Recursively add attributes to a node
+        
+        Args:
+            parent_node: The tree node to add attributes to
+            obj: The object to extract attributes from
+            max_depth: Maximum recursion depth to prevent infinite loops
+            current_depth: Current recursion depth
+        """
+        if current_depth >= max_depth:
+            parent_node.add("[dim][italic]... (max depth reached)[/dim][/italic]")
+            return
+            
+        # Get all attributes that don't start with underscore
+        attrs = {}
+        try:
+            if hasattr(obj, "__dict__") and obj.__dict__:
+                # Add from __dict__ first (instance attributes)
+                for name, value in obj.__dict__.items():
+                    if not name.startswith('_') and not callable(value):
+                        attrs[name] = value
+            
+            # Then add from dir() (includes properties, etc.)
+            for name in dir(obj):
+                if name not in attrs and not name.startswith('_'):
+                    try:
+                        value = getattr(obj, name)
+                        # Skip methods and built-in functions
+                        if not callable(value):
+                            attrs[name] = value
+                    except Exception as e:
+                        attrs[name] = f"Error: {str(e)}"
+        except Exception as e:
+            parent_node.add(f"[red]<Error accessing attributes: {str(e)}>[/red]")
+            return
+        
+        # Sort attributes by name
+        for name in sorted(attrs.keys()):
+            value = attrs[name]
+            node_label = f"[attr-name]{name}[/attr-name]: {self.format_value(value)}"
+            
+            # Check if this is a simple type (leaf node) or complex type (expandable)
+            is_leaf = self.is_simple_type(value)
+            
+            # Add node to the parent
+            attr_node = parent_node.add(node_label)
+            
+            # Set expandability based on type
+            attr_node._allow_expand = not is_leaf
+            
+            # Only add children for complex types
+            if not is_leaf:
+                if isinstance(value, dict) and len(value) > 0:
+                    for k, v in sorted(value.items()):
+                        child_label = f"[attr-name]{k}[/attr-name]: {self.format_value(v)}"
+                        child_node = attr_node.add(child_label)
+                        child_node._allow_expand = not self.is_simple_type(v)
+                        
+                        # Recursively add attributes if it's a complex type
+                        if not self.is_simple_type(v):
+                            self.add_attributes_to_node(child_node, v, max_depth, current_depth + 1)
+                        
+                elif isinstance(value, (list, tuple)) and len(value) > 0 and len(value) <= 20:
+                    for i, item in enumerate(value):
+                        child_label = f"[attr-name]{i}[/attr-name]: {self.format_value(item)}"
+                        child_node = attr_node.add(child_label)
+                        child_node._allow_expand = not self.is_simple_type(item)
+                        
+                        # Recursively add attributes if it's a complex type
+                        if not self.is_simple_type(item):
+                            self.add_attributes_to_node(child_node, item, max_depth, current_depth + 1)
+                
+                elif hasattr(value, "__dict__") or len(dir(value)) > 0:
+                    try:
+                        # Recursively add attributes
+                        self.add_attributes_to_node(attr_node, value, max_depth, current_depth + 1)
+                    except Exception as e:
+                        attr_node.add(f"[red]<Error accessing attributes: {str(e)}>[/red]")
+    
     def build_attributes_tree(self, obj):
         """Build a tree of attributes for the given object"""
         attrs_tree = self.query_one("#attrs-pane > Tree")
@@ -439,36 +525,8 @@ class ModelTreeViewer(App):
         # Set the root node label
         attrs_tree.root.label = f"Attributes of {obj.__class__.__name__}"
         
-        # Get all attributes that don't start with underscore
-        attrs = {}
-        for name in dir(obj):
-            if not name.startswith('_'):
-                try:
-                    value = getattr(obj, name)
-                    # Skip methods and built-in functions
-                    if not callable(value):
-                        attrs[name] = value
-                except Exception as e:
-                    attrs[name] = f"Error: {str(e)}"
-        
-        # Sort attributes by name
-        for name in sorted(attrs.keys()):
-            value = attrs[name]
-            node_label = f"[attr-name]{name}[/attr-name]: {self.format_value(value)}"
-            
-            # Add node to the root
-            attr_node = attrs_tree.root.add(node_label)
-            
-            # Add child nodes for complex types
-            if isinstance(value, dict) and len(value) > 0:
-                for k, v in value.items():
-                    child_label = f"[attr-name]{k}[/attr-name]: {self.format_value(v)}"
-                    attr_node.add(child_label)
-                    
-            elif isinstance(value, (list, tuple)) and len(value) > 0 and len(value) <= 20:
-                for i, item in enumerate(value):
-                    child_label = f"[attr-name]{i}[/attr-name]: {self.format_value(item)}"
-                    attr_node.add(child_label)
+        # Add attributes recursively
+        self.add_attributes_to_node(attrs_tree.root, obj)
         
         # Expand the root
         attrs_tree.root.expand()
