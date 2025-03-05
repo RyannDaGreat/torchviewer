@@ -4,6 +4,10 @@ from textual.binding import Binding
 import diffusers
 from typing import Dict, Optional, Any
 import torch
+from rich.text import Text
+from rich.pretty import Pretty
+from rich.console import Console
+from io import StringIO
 
 class ModuleNode:
     """Node representing a PyTorch module"""
@@ -15,15 +19,23 @@ class ModuleNode:
 
     def get_label(self, show_tensor_shapes=True) -> str:
         """Get the display label for this node"""
+        # Use direct formatting tags for bold yellow for the name part
         if self.name:
-            node_text = f"({self.name}): {self.module_type}"
+            module_part = f"[bold yellow]({self.name})[/bold yellow]: "
         else:
-            node_text = self.module_type
+            module_part = ""
             
+        # Create code string with color to simulate Python syntax highlighting
+        # Use cyan (typical for class names in Python highlighting)
+        code_part = f"[cyan]{self.module_type}[/cyan]"
         if self.extra_info:
-            # Don't truncate the extra info anymore
-            node_text += f"({self.extra_info})"
-                
+            # Use blue (typical for function parameters in Python highlighting)
+            code_part += f"[blue]({self.extra_info})[/blue]"
+            
+        # Combine parts - module_name in bold yellow, code in syntax colors
+        node_text = module_part + code_part
+        
+        # Add tensor shape info if needed
         if show_tensor_shapes and self.state_dict_info:
             node_text += f" | [tensor-shape]{self.state_dict_info}[/tensor-shape]"
                 
@@ -42,6 +54,10 @@ class ModelTreeViewer(App):
     .tensor-shape {
         color: #5fd700;
         text-style: italic;
+    }
+    
+    Tree > .tree--cursor {
+        background: #3a3a3a;
     }
     """
     
@@ -135,7 +151,13 @@ class ModelTreeViewer(App):
         
         # Add all child modules
         for key, child_module in module._modules.items():
-            child_node = tree_node.add(f"({key}): {child_module._get_name()}")
+            # Apply consistent formatting with yellow module name and syntax-colored code
+            module_part = f"[bold yellow]({key})[/bold yellow]: "
+            # Use cyan for the class name (typical Python syntax highlighting)
+            code_part = f"[cyan]{child_module._get_name()}[/cyan]"
+            formatted_label = module_part + code_part
+            
+            child_node = tree_node.add(formatted_label)
             self.populate_tree(child_module, child_node)
     
     
