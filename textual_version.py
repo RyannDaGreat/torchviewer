@@ -58,53 +58,69 @@ class AttributeTree:
                 (isinstance(value, dict) and len(value) == 0))
     
     def format_value(self, value):
-        """Format a value for display in the attributes tree with syntax highlighting
+        """Format a value for display in the attributes tree with Python syntax highlighting
         
         Args:
             value: The value to format
             
         Returns:
-            str: Formatted value with rich markup for syntax highlighting
+            str: Formatted value with rich markup for Python syntax highlighting
         """
         MAX_STR_LENGTH = 100  # Maximum length for string display
         
         try:
             if value is None:
-                return "[attr-value-none]None[/attr-value-none]"
+                return "[blue bold]None[/blue bold]"  # Python None is typically blue
             elif isinstance(value, bool):
-                return f"[attr-value-bool]{value}[/attr-value-bool]"
-            elif isinstance(value, (int, float)):
-                return f"[attr-value-num]{value}[/attr-value-num]"
+                return f"[blue bold]{value}[/blue bold]"  # Python booleans are typically blue like keywords
+            elif isinstance(value, int):
+                return f"[#b5cea8]{value}[/#b5cea8]"  # VS Code number color
+            elif isinstance(value, float):
+                return f"[#b5cea8]{value}[/#b5cea8]"  # VS Code number color
             elif isinstance(value, str):
                 try:
                     if len(value) > MAX_STR_LENGTH:
                         truncated = value[:MAX_STR_LENGTH] + "..."
-                        return f"[attr-value-str]\"{truncated}\"[/attr-value-str]"
+                        return f"[#ce9178]\"{truncated}\"[/#ce9178]"  # VS Code string color
                     else:
-                        return f"[attr-value-str]\"{value}\"[/attr-value-str]"
+                        return f"[#ce9178]\"{value}\"[/#ce9178]"  # VS Code string color
                 except Exception as e:
-                    return f"[attr-value-str]<Error accessing string: {str(e)}>[/attr-value-str]"
+                    return f"[red]<Error accessing string: {str(e)}>[/red]"
             elif isinstance(value, (list, tuple)):
                 try:
+                    type_name = type(value).__name__
                     if len(value) > 5:
-                        return f"[attr-type]{type(value).__name__}[/attr-type] with {len(value)} items"
+                        return f"[#4ec9b0]{type_name}[/#4ec9b0] [#dddddd]with {len(value)} items[/#dddddd]"
                     else:
-                        return f"[attr-type]{type(value).__name__}[/attr-type] {value}"
+                        # Format collection with proper Python syntax highlighting
+                        if isinstance(value, list):
+                            items = []
+                            for item in value:
+                                items.append(self.format_value(item))
+                            return f"[#dddddd][[/#dddddd]{', '.join(items)}[#dddddd]][/#dddddd]"
+                        elif isinstance(value, tuple):
+                            items = []
+                            for item in value:
+                                items.append(self.format_value(item))
+                            return f"[#dddddd]([/#dddddd]{', '.join(items)}[#dddddd])[/#dddddd]"
                 except Exception as e:
-                    return f"[attr-type]{type(value).__name__}[/attr-type] <Error: {str(e)}>"
+                    return f"[#4ec9b0]{type(value).__name__}[/#4ec9b0] [red]<Error: {str(e)}>[/red]"
             elif isinstance(value, dict):
                 try:
-                    return f"[attr-type]dict[/attr-type] with {len(value)} keys"
+                    if len(value) == 0:
+                        return "[#dddddd]{}[/#dddddd]"
+                    return f"[#4ec9b0]dict[/#4ec9b0] [#dddddd]with {len(value)} keys[/#dddddd]"
                 except Exception as e:
-                    return f"[attr-type]dict[/attr-type] <Error: {str(e)}>"
+                    return f"[#4ec9b0]dict[/#4ec9b0] [red]<Error: {str(e)}>[/red]"
             elif isinstance(value, torch.Tensor):
                 try:
                     shape_str = 'x'.join(str(dim) for dim in value.shape)
-                    return f"[attr-type]Tensor[/attr-type] shape={shape_str}, dtype={value.dtype}"
+                    return f"[#4ec9b0]Tensor[/#4ec9b0] [#dddddd]shape={shape_str}, dtype={value.dtype}[/#dddddd]"
                 except Exception as e:
-                    return f"[attr-type]Tensor[/attr-type] <Error accessing properties: {str(e)}>"
+                    return f"[#4ec9b0]Tensor[/#4ec9b0] [red]<Error accessing properties: {str(e)}>[/red]"
             else:
-                return f"[attr-type]{type(value).__name__}[/attr-type]"
+                # For other types, use type color for class name
+                return f"[#4ec9b0]{type(value).__name__}[/#4ec9b0]"
         except Exception as e:
             return f"[red]<Error formatting value: {str(e)}>[/red]"
     
@@ -147,7 +163,8 @@ class AttributeTree:
         # Sort attributes by name
         for name in sorted(attrs.keys()):
             value = attrs[name]
-            node_label = f"[attr-name]{name}[/attr-name]: {self.format_value(value)}"
+            # Format attribute name in bold cyan (VS Code style for property names)
+            node_label = f"[bold #569cd6]{name}[/bold #569cd6]: {self.format_value(value)}"
             
             # Check if this is a simple type (leaf node) or complex type (expandable)
             is_leaf = self.is_simple_type(value)
@@ -162,7 +179,9 @@ class AttributeTree:
             if not is_leaf:
                 if isinstance(value, dict) and len(value) > 0:
                     for k, v in sorted(value.items()):
-                        child_label = f"[attr-name]{k}[/attr-name]: {self.format_value(v)}"
+                        # Format dictionary keys also in bold cyan
+                        key_str = str(k) if not isinstance(k, str) else k
+                        child_label = f"[bold #569cd6]{key_str}[/bold #569cd6]: {self.format_value(v)}"
                         child_node = attr_node.add(child_label)
                         child_node._allow_expand = not self.is_simple_type(v)
                         
@@ -172,7 +191,8 @@ class AttributeTree:
                         
                 elif isinstance(value, (list, tuple)) and len(value) > 0 and len(value) <= 20:
                     for i, item in enumerate(value):
-                        child_label = f"[attr-name]{i}[/attr-name]: {self.format_value(item)}"
+                        # Format indices in bold number color
+                        child_label = f"[bold #b5cea8]{i}[/bold #b5cea8]: {self.format_value(item)}"
                         child_node = attr_node.add(child_label)
                         child_node._allow_expand = not self.is_simple_type(item)
                         
@@ -339,36 +359,9 @@ class ModelTreeViewer(App):
         text-style: italic;
     }
     
-    .attr-name {
-        color: #569cd6;
-        text-style: bold;
-    }
-    
-    .attr-type {
-        color: #4ec9b0;
-        text-style: italic;
-    }
-    
-    .attr-value-str {
-        color: #ce9178;
-    }
-    
-    .attr-value-num {
-        color: #b5cea8;
-    }
-    
-    .attr-value-bool {
-        color: #569cd6;
-        text-style: bold;
-    }
-    
-    .attr-value-none {
-        color: #569cd6;
-        text-style: bold;
-    }
-    
     Tree > .tree--cursor {
         background: #3a3a3a;
+        color: #ffffff;
     }
     """
     
@@ -385,6 +378,8 @@ class ModelTreeViewer(App):
         Binding("up", "cursor_up", ""),
         Binding("left", "cursor_left", ""),
         Binding("right", "cursor_right", ""),
+        Binding("page_up", "page_up", ""),
+        Binding("page_down", "page_down", ""),
         
         # Expand/Collapse
         Binding("space", "toggle_node", "Toggle"),
@@ -434,7 +429,11 @@ class ModelTreeViewer(App):
                 yield Static("", id="code-title")
                 # Code editor in a container to control height
                 with Static(id="code-editor"):
-                    editor = TextArea(language="python", read_only=True, show_line_numbers=True)
+                    editor = TextArea(
+                        language="python", 
+                        read_only=True, 
+                        show_line_numbers=True
+                    )
                     # We'll register the theme after the widget is mounted
                     yield editor
                 
@@ -646,6 +645,22 @@ class ModelTreeViewer(App):
             # When pressing right on a selected node, update the editor
             if node in self.node_data and self.node_data[node].module:
                 self.update_editor_with_module(self.node_data[node].module)
+    
+    def action_page_up(self) -> None:
+        """Handle Page Up key to scroll the code editor up"""
+        # Check if code panel is visible
+        if self.code_panel_visible:
+            editor = self.query_one("#code-editor > TextArea")
+            # Scroll up a page
+            editor.scroll_page_up()
+    
+    def action_page_down(self) -> None:
+        """Handle Page Down key to scroll the code editor down"""
+        # Check if code panel is visible
+        if self.code_panel_visible:
+            editor = self.query_one("#code-editor > TextArea")
+            # Scroll down a page
+            editor.scroll_page_down()
     
     def toggle_node_state(self, node, expand: Optional[bool] = None) -> bool:
         """Toggle or set a node's expand/collapse state
@@ -882,6 +897,7 @@ class ModelTreeViewer(App):
         
         # Update layout based on which panels are visible
         self.update_panel_layout()
+        
     
     def update_panel_layout(self) -> None:
         """Update the layout based on which panels are visible"""
