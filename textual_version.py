@@ -65,6 +65,17 @@ class ModelTreeViewer(App):
     #editor-pane {
         width: 60%;
         height: 100%;
+        layout: vertical;
+    }
+    
+    #code-title {
+        height: auto;
+        padding: 1;
+        border-bottom: solid gray;
+        background: #333333;
+        color: #ffffff;
+        text-align: center;
+        text-style: bold;
     }
     
     Tree {
@@ -75,7 +86,7 @@ class ModelTreeViewer(App):
     
     TextArea {
         width: 100%;
-        height: 100%;
+        height: 1fr;
     }
     
     .tensor-shape {
@@ -136,7 +147,9 @@ class ModelTreeViewer(App):
             
             # Right pane with code editor
             with Static(id="editor-pane"):
-                editor = TextArea(language="python", read_only=True)
+                # Create a static widget to display the file path
+                yield Static("", id="code-title")
+                editor = TextArea(language="python", read_only=True, show_line_numbers=True)
                 # We'll register the theme after the widget is mounted
                 yield editor
                 
@@ -225,11 +238,21 @@ class ModelTreeViewer(App):
     def update_editor_with_module(self, module) -> None:
         """Update the editor with module source code"""
         editor = self.query_one(TextArea)
+        code_title = self.query_one("#code-title")
         
         try:
             # Get source code for the module class
             source = inspect.getsource(module.__class__)
             line_number = inspect.getsourcelines(module.__class__)[1]
+            
+            # Get file path information if available
+            try:
+                file_path = inspect.getfile(module.__class__)
+            except (TypeError, OSError):
+                file_path = "Unknown file path"
+            
+            # Update the title with the file path
+            code_title.update(f"{file_path}")
             
             # Set the content in the editor
             editor.text = source
@@ -239,6 +262,7 @@ class ModelTreeViewer(App):
             
         except (TypeError, OSError) as e:
             # Handle case where source isn't available (built-in modules, etc.)
+            code_title.update(f"{module.__class__.__name__}")
             editor.text = f"# Source code not available for {module.__class__.__name__}\n# {str(e)}"
     
     def action_cursor_down(self) -> None:
