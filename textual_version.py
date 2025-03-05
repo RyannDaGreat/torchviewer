@@ -13,23 +13,63 @@ from rich.console import Console
 from rich.style import Style
 from io import StringIO
 import inspect
+import numpy as np
+
+def human_readable_file_size(file_size:int):
+    """
+    Given a file size in bytes, return a string that represents how large it is in megabytes, gigabytes etc - whatever's easiest to interperet
+    EXAMPLES:
+         >>> human_readable_file_size(0)
+        ans = 0B
+         >>> human_readable_file_size(100)
+        ans = 100B
+         >>> human_readable_file_size(1023)
+        ans = 1023B
+         >>> human_readable_file_size(1024)
+        ans = 1KB
+         >>> human_readable_file_size(1025)
+        ans = 1.0KB
+         >>> human_readable_file_size(1000000)
+        ans = 976.6KB
+         >>> human_readable_file_size(10000000)
+        ans = 9.5MB
+         >>> human_readable_file_size(1000000000)
+        ans = 953.7MB
+         >>> human_readable_file_size(10000000000)
+        ans = 9.3GB
+    """
+
+    for count in 'B KB MB GB TB PB EB ZB YB BB GB'.split():
+        #Bytes Kilobytes Megabytes Gigabytes Terrabytes Petabytes Exobytes Zettabytes Yottabytes Brontobytes Geopbytes
+        if file_size > -1024.0 and file_size < 1024.0:
+            if int(file_size)==file_size:
+                return "%i%s" % (file_size, count)
+            else:
+                return "%3.1f%s" % (file_size, count)
+        file_size /= 1024.0
 
 class ModuleNode:
     """Node representing a PyTorch module"""
-    def __init__(self, name: str, module_type: str, extra_info: str = "", state_dict_info: str = "", module=None):
+    def __init__(self, name: str, module_type: str, extra_info: str = "", state_dict_info: str = "", module=None, size_bytes: int = 0):
         self.name = name
         self.module_type = module_type
         self.extra_info = extra_info
         self.state_dict_info = state_dict_info
         self.module = module
+        self.size_bytes = size_bytes
 
-    def get_label(self, show_tensor_shapes=True) -> str:
+    def get_label(self, show_tensor_shapes=True, show_node_sizes=True) -> str:
         """Get the display label for this node"""
+        # Format the size info with human readable size
+        size_info = ""
+        if show_node_sizes and self.size_bytes > 0:
+            size_info = f"[bold green]{human_readable_file_size(self.size_bytes)}[/bold green] "
+            
         # Use direct formatting tags for bold yellow for the name part
         if self.name:
-            module_part = f"[bold yellow]({self.name})[/bold yellow]: "
+            module_part = f"{size_info}[bold yellow]({self.name})[/bold yellow]: "
         else:
-            module_part = ""
+            module_part = f"{size_info}"
             
         # Create code string with color to simulate Python syntax highlighting
         # Use cyan (typical for class names in Python highlighting)
@@ -119,6 +159,7 @@ class ModelTreeViewer(App):
         
         # Display options
         Binding("t", "toggle_tensor_shapes", "Toggle Tensor Shapes"),
+        Binding("b", "toggle_node_sizes", "Toggle Node Sizes"),
         Binding("i", "toggle_code_panel", "Toggle Code Panel"),
     ]
     
@@ -131,6 +172,9 @@ class ModelTreeViewer(App):
         
         # Flag to control whether to show tensor shapes
         self.show_tensor_shapes = True
+        
+        # Flag to control whether to show node sizes
+        self.show_node_sizes = True
         
         # Flag to track if code panel is visible
         self.code_panel_visible = True
@@ -171,10 +215,47 @@ class ModelTreeViewer(App):
         if self.model:
             self.populate_tree(self.model, tree.root)
     
+    def calculate_module_size(self, module):
+        """Calculate the size of a module in bytes based on its state_dict tensors"""
+        total_size = 0
+        try:
+            state_dict = module.state_dict()
+            for param_name, tensor in state_dict.items():
+                if isinstance(tensor, torch.Tensor):
+                    # Calculate tensor size: num_elements * element_size_in_bytes
+                    num_elements = np.prod(tensor.shape)
+                    # Get element size in bytes based on dtype
+                    if tensor.dtype == torch.float32:
+                        element_size = 4
+                    elif tensor.dtype == torch.float16 or tensor.dtype == torch.bfloat16:
+                        element_size = 2
+                    elif tensor.dtype == torch.int64 or tensor.dtype == torch.double:
+                        element_size = 8
+                    elif tensor.dtype == torch.int32 or tensor.dtype == torch.float:
+                        element_size = 4
+                    elif tensor.dtype == torch.int16:
+                        element_size = 2
+                    elif tensor.dtype == torch.int8 or tensor.dtype == torch.uint8 or tensor.dtype == torch.bool:
+                        element_size = 1
+                    else:
+                        # Default fallback, most common case is float32 (4 bytes)
+                        element_size = 4
+                        
+                    tensor_size = num_elements * element_size
+                    total_size += tensor_size
+        except Exception as e:
+            # If there's an error calculating size, return 0
+            return 0
+            
+        return total_size
+        
     def populate_tree(self, module, tree_node):
         """Recursively populate tree from PyTorch module"""
         module_name = module._get_name()
         extra_info = module.extra_repr()
+        
+        # Calculate the module size in bytes
+        module_size = self.calculate_module_size(module)
         
         # Get state dict info for leaf modules (no children)
         state_dict_info = ""
@@ -204,11 +285,12 @@ class ModelTreeViewer(App):
         
         node_data = ModuleNode(name=node_name, module_type=module_name, 
                               extra_info=extra_info, state_dict_info=state_dict_info, 
-                              module=module)
+                              module=module, size_bytes=module_size)
         self.node_data[tree_node] = node_data
         
         # Set node display text
-        tree_node.label = node_data.get_label(show_tensor_shapes=self.show_tensor_shapes)
+        tree_node.label = node_data.get_label(show_tensor_shapes=self.show_tensor_shapes, 
+                                              show_node_sizes=self.show_node_sizes)
         
         # Add all child modules
         has_children = bool(module._modules)
@@ -450,7 +532,10 @@ class ModelTreeViewer(App):
         
         def update_node_label(node):
             if node in self.node_data:
-                node.label = self.node_data[node].get_label(show_tensor_shapes=self.show_tensor_shapes)
+                node.label = self.node_data[node].get_label(
+                    show_tensor_shapes=self.show_tensor_shapes,
+                    show_node_sizes=self.show_node_sizes
+                )
             for child in node.children:
                 update_node_label(child)
         
@@ -458,6 +543,27 @@ class ModelTreeViewer(App):
         
         status = "Showing" if self.show_tensor_shapes else "Hiding"
         self.notify(f"{status} tensor shapes")
+        
+    def action_toggle_node_sizes(self) -> None:
+        """Toggle display of node sizes in the tree"""
+        self.show_node_sizes = not self.show_node_sizes
+        
+        # Update all node labels
+        tree = self.query_one(Tree)
+        
+        def update_node_label(node):
+            if node in self.node_data:
+                node.label = self.node_data[node].get_label(
+                    show_tensor_shapes=self.show_tensor_shapes,
+                    show_node_sizes=self.show_node_sizes
+                )
+            for child in node.children:
+                update_node_label(child)
+        
+        update_node_label(tree.root)
+        
+        status = "Showing" if self.show_node_sizes else "Hiding"
+        self.notify(f"{status} node sizes")
         
     def action_toggle_code_panel(self) -> None:
         """Toggle visibility of the code panel"""
