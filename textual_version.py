@@ -3,15 +3,17 @@ from textual.widgets import Tree, Footer
 from textual.binding import Binding
 import diffusers
 from typing import Dict, Optional, Any
+import torch
 
 class ModuleNode:
     """Node representing a PyTorch module"""
-    def __init__(self, name: str, module_type: str, extra_info: str = ""):
+    def __init__(self, name: str, module_type: str, extra_info: str = "", state_dict_info: str = ""):
         self.name = name
         self.module_type = module_type
         self.extra_info = extra_info
+        self.state_dict_info = state_dict_info
 
-    def get_label(self) -> str:
+    def get_label(self, show_tensor_shapes=True) -> str:
         """Get the display label for this node"""
         if self.name:
             node_text = f"({self.name}): {self.module_type}"
@@ -21,6 +23,9 @@ class ModuleNode:
         if self.extra_info:
             # Don't truncate the extra info anymore
             node_text += f"({self.extra_info})"
+                
+        if show_tensor_shapes and self.state_dict_info:
+            node_text += f" | [tensor-shape]{self.state_dict_info}[/tensor-shape]"
                 
         return node_text
 
@@ -32,6 +37,11 @@ class ModelTreeViewer(App):
         width: 100%;
         height: 100%;
         overflow-x: auto;  /* Allow horizontal scrolling */
+    }
+    
+    .tensor-shape {
+        color: #5fd700;
+        text-style: italic;
     }
     """
     
@@ -52,6 +62,9 @@ class ModelTreeViewer(App):
         Binding("s", "collapse_subtree", "Collapse Subtree"),
         Binding("S", "expand_subtree", "Expand Subtree"),
         Binding("T", "toggle_same_class", "Toggle Same Class Type"),
+        
+        # Display options
+        Binding("t", "toggle_tensor_shapes", "Toggle Tensor Shapes"),
     ]
     
     def __init__(self, model=None):
@@ -60,6 +73,9 @@ class ModelTreeViewer(App):
         
         # Cache node_data for each tree node
         self.node_data: Dict[Any, ModuleNode] = {}
+        
+        # Flag to control whether to show tensor shapes
+        self.show_tensor_shapes = True
     
     def compose(self) -> ComposeResult:
         """Compose the UI"""
@@ -79,6 +95,22 @@ class ModelTreeViewer(App):
         module_name = module._get_name()
         extra_info = module.extra_repr()
         
+        # Get state dict info for leaf modules (no children)
+        state_dict_info = ""
+        if not module._modules:  # This is a leaf module
+            try:
+                # Get state dict and format tensor shapes
+                params = list(module.state_dict().items())
+                if params:
+                    shapes = []
+                    for param_name, tensor in params:
+                        if isinstance(tensor, torch.Tensor):
+                            shape_str = f"{param_name}: {tuple(tensor.shape)}"
+                            shapes.append(shape_str)
+                    state_dict_info = ", ".join(shapes)
+            except Exception as e:
+                state_dict_info = f"Error: {str(e)}"
+        
         # Create or get the parent node data
         if tree_node == self.query_one(Tree).root:
             node_name = ""
@@ -89,11 +121,11 @@ class ModelTreeViewer(App):
             else:
                 node_name = node_label
         
-        node_data = ModuleNode(node_name, module_name, extra_info)
+        node_data = ModuleNode(node_name, module_name, extra_info, state_dict_info)
         self.node_data[tree_node] = node_data
         
         # Set node display text
-        tree_node.label = node_data.get_label()
+        tree_node.label = node_data.get_label(show_tensor_shapes=self.show_tensor_shapes)
         
         # Add all child modules
         has_children = bool(module._modules)
@@ -279,7 +311,23 @@ class ModelTreeViewer(App):
         action = "Expanded" if expand else "Collapsed"
         self.notify(f"{action} {count} nodes of class {target_module_type}")
     
-
+    def action_toggle_tensor_shapes(self) -> None:
+        """Toggle display of tensor shapes in the tree"""
+        self.show_tensor_shapes = not self.show_tensor_shapes
+        
+        # Update all node labels
+        tree = self.query_one(Tree)
+        
+        def update_node_label(node):
+            if node in self.node_data:
+                node.label = self.node_data[node].get_label(show_tensor_shapes=self.show_tensor_shapes)
+            for child in node.children:
+                update_node_label(child)
+        
+        update_node_label(tree.root)
+        
+        status = "Showing" if self.show_tensor_shapes else "Hiding"
+        self.notify(f"{status} tensor shapes")
 
 
 
