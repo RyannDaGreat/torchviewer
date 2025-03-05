@@ -1,7 +1,7 @@
 from textual.app import App, ComposeResult
 from textual.widgets import Tree, Footer, Static
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.widgets._text_area import TextArea
 from textual._text_area_theme import TextAreaTheme
 import diffusers
@@ -118,6 +118,28 @@ class ModelTreeViewer(App):
         text-style: bold;
     }
     
+    #code-editor {
+        height: 2fr;
+        width: 100%;
+        border-bottom: solid gray;
+    }
+    
+    #attrs-title {
+        height: auto;
+        padding: 1;
+        border-bottom: solid gray;
+        background: #333333;
+        color: #ffffff;
+        text-align: center;
+        text-style: bold;
+    }
+    
+    #attrs-pane {
+        height: 1fr;
+        width: 100%;
+        overflow-y: auto;
+    }
+    
     Tree {
         width: 100%;
         height: 100%;
@@ -126,12 +148,40 @@ class ModelTreeViewer(App):
     
     TextArea {
         width: 100%;
-        height: 1fr;
+        height: 100%;
     }
     
     .tensor-shape {
         color: #5fd700;
         text-style: italic;
+    }
+    
+    .attr-name {
+        color: #569cd6;
+        text-style: bold;
+    }
+    
+    .attr-type {
+        color: #4ec9b0;
+        text-style: italic;
+    }
+    
+    .attr-value-str {
+        color: #ce9178;
+    }
+    
+    .attr-value-num {
+        color: #b5cea8;
+    }
+    
+    .attr-value-bool {
+        color: #569cd6;
+        text-style: bold;
+    }
+    
+    .attr-value-none {
+        color: #569cd6;
+        text-style: bold;
     }
     
     Tree > .tree--cursor {
@@ -163,6 +213,7 @@ class ModelTreeViewer(App):
         Binding("t", "toggle_tensor_shapes", "Shapes"),
         Binding("b", "toggle_node_sizes", "Sizes"),
         Binding("i", "toggle_code_panel", "Code"),
+        Binding("r", "refresh_attrs", "Refresh Attributes"),
     ]
     
     def __init__(self, model=None):
@@ -191,27 +242,38 @@ class ModelTreeViewer(App):
             with Static(id="tree-pane"):
                 yield Tree("Model Structure")
             
-            # Right pane with code editor
+            # Right pane with code editor and attributes
             with Static(id="editor-pane"):
                 # Create a static widget to display the file path
                 yield Static("", id="code-title")
-                editor = TextArea(language="python", read_only=True, show_line_numbers=True)
-                # We'll register the theme after the widget is mounted
-                yield editor
+                # Code editor in a container to control height
+                with Static(id="code-editor"):
+                    editor = TextArea(language="python", read_only=True, show_line_numbers=True)
+                    # We'll register the theme after the widget is mounted
+                    yield editor
+                
+                # Attributes section
+                yield Static("Object Attributes", id="attrs-title")
+                with Static(id="attrs-pane"):
+                    yield Tree("No Object Selected")
                 
         yield Footer()
     
     def on_mount(self) -> None:
         """Set up the UI when app is mounted"""
-        # Set up the tree
-        tree = self.query_one(Tree)
+        # Set up the model tree
+        tree = self.query_one("#tree-pane > Tree")
         tree.root.expand()
         
         # Register theme with editor
-        editor = self.query_one(TextArea)
+        editor = self.query_one("#code-editor > TextArea")
         if self.editor_theme:
             editor.register_theme(self.editor_theme)
             editor.theme = "vscode_dark"
+        
+        # Initialize attributes tree
+        attrs_tree = self.query_one("#attrs-pane > Tree")
+        attrs_tree.root.expand()
         
         # Populate the tree if we have a model
         if self.model:
@@ -312,16 +374,102 @@ class ModelTreeViewer(App):
             self.populate_tree(child_module, child_node)
     
     def on_tree_node_selected(self, event) -> None:
-        """Handle tree node selection to update the editor"""
+        """Handle tree node selection to update the editor and attributes tree"""
+        # Check if the selected node is from the main model tree by checking if it's in our node_data
         node = event.node
         if node in self.node_data:
             module = self.node_data[node].module
             if module is not None:
                 self.update_editor_with_module(module)
     
+    def format_value(self, value):
+        """Format a value for display in the attributes tree with syntax highlighting"""
+        MAX_STR_LENGTH = 100  # Maximum length for string display
+        
+        try:
+            if value is None:
+                return "[attr-value-none]None[/attr-value-none]"
+            elif isinstance(value, bool):
+                return f"[attr-value-bool]{value}[/attr-value-bool]"
+            elif isinstance(value, (int, float)):
+                return f"[attr-value-num]{value}[/attr-value-num]"
+            elif isinstance(value, str):
+                try:
+                    if len(value) > MAX_STR_LENGTH:
+                        truncated = value[:MAX_STR_LENGTH] + "..."
+                        return f"[attr-value-str]\"{truncated}\"[/attr-value-str]"
+                    else:
+                        return f"[attr-value-str]\"{value}\"[/attr-value-str]"
+                except Exception as e:
+                    return f"[attr-value-str]<Error accessing string: {str(e)}>[/attr-value-str]"
+            elif isinstance(value, (list, tuple)):
+                try:
+                    if len(value) > 5:
+                        return f"[attr-type]{type(value).__name__}[/attr-type] with {len(value)} items"
+                    else:
+                        return f"[attr-type]{type(value).__name__}[/attr-type] {value}"
+                except Exception as e:
+                    return f"[attr-type]{type(value).__name__}[/attr-type] <Error: {str(e)}>"
+            elif isinstance(value, dict):
+                try:
+                    return f"[attr-type]dict[/attr-type] with {len(value)} keys"
+                except Exception as e:
+                    return f"[attr-type]dict[/attr-type] <Error: {str(e)}>"
+            elif isinstance(value, torch.Tensor):
+                try:
+                    shape_str = 'x'.join(str(dim) for dim in value.shape)
+                    return f"[attr-type]Tensor[/attr-type] shape={shape_str}, dtype={value.dtype}"
+                except Exception as e:
+                    return f"[attr-type]Tensor[/attr-type] <Error accessing properties: {str(e)}>"
+            else:
+                return f"[attr-type]{type(value).__name__}[/attr-type]"
+        except Exception as e:
+            return f"[red]<Error formatting value: {str(e)}>[/red]"
+    
+    def build_attributes_tree(self, obj):
+        """Build a tree of attributes for the given object"""
+        attrs_tree = self.query_one("#attrs-pane > Tree")
+        attrs_tree.clear()
+        # Set the root node label
+        attrs_tree.root.label = f"Attributes of {obj.__class__.__name__}"
+        
+        # Get all attributes that don't start with underscore
+        attrs = {}
+        for name in dir(obj):
+            if not name.startswith('_'):
+                try:
+                    value = getattr(obj, name)
+                    # Skip methods and built-in functions
+                    if not callable(value):
+                        attrs[name] = value
+                except Exception as e:
+                    attrs[name] = f"Error: {str(e)}"
+        
+        # Sort attributes by name
+        for name in sorted(attrs.keys()):
+            value = attrs[name]
+            node_label = f"[attr-name]{name}[/attr-name]: {self.format_value(value)}"
+            
+            # Add node to the root
+            attr_node = attrs_tree.root.add(node_label)
+            
+            # Add child nodes for complex types
+            if isinstance(value, dict) and len(value) > 0:
+                for k, v in value.items():
+                    child_label = f"[attr-name]{k}[/attr-name]: {self.format_value(v)}"
+                    attr_node.add(child_label)
+                    
+            elif isinstance(value, (list, tuple)) and len(value) > 0 and len(value) <= 20:
+                for i, item in enumerate(value):
+                    child_label = f"[attr-name]{i}[/attr-name]: {self.format_value(item)}"
+                    attr_node.add(child_label)
+        
+        # Expand the root
+        attrs_tree.root.expand()
+                
     def update_editor_with_module(self, module) -> None:
-        """Update the editor with module source code"""
-        editor = self.query_one(TextArea)
+        """Update the editor with module source code and attributes"""
+        editor = self.query_one("#code-editor > TextArea")
         code_title = self.query_one("#code-title")
         
         try:
@@ -348,6 +496,9 @@ class ModelTreeViewer(App):
             # Handle case where source isn't available (built-in modules, etc.)
             code_title.update(f"{module.__class__.__name__}")
             editor.text = f"# Source code not available for {module.__class__.__name__}\n# {str(e)}"
+        
+        # Build the attributes tree
+        self.build_attributes_tree(module)
     
     def action_cursor_down(self) -> None:
         """Move cursor down (j key)"""
@@ -580,6 +731,14 @@ class ModelTreeViewer(App):
         status = "Showing" if self.show_node_sizes else "Hiding"
         self.notify(f"{status} node sizes")
         
+    def action_refresh_attrs(self) -> None:
+        """Refresh the attributes tree for the current module"""
+        if self.cursor_node and self.cursor_node in self.node_data:
+            module = self.node_data[self.cursor_node].module
+            if module is not None:
+                self.build_attributes_tree(module)
+                self.notify("Refreshed attributes")
+    
     def action_toggle_code_panel(self) -> None:
         """Toggle visibility of the code panel"""
         self.code_panel_visible = not self.code_panel_visible
