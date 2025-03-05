@@ -144,23 +144,23 @@ class ModelTreeViewer(App):
         Binding("q", "quit", "Quit"),
         
         # Navigation - vim style
-        Binding("j", "cursor_down", "Down"),
-        Binding("k", "cursor_up", "Up"),
-        Binding("h", "cursor_left", "Left"),
-        Binding("l", "cursor_right", "Right"),
+        Binding("j", "cursor_down", "↓"),
+        Binding("k", "cursor_up", "↑"),
+        Binding("h", "cursor_left", "←"),
+        Binding("l", "cursor_right", "→"),
         
         # Expand/Collapse
-        Binding("space", "toggle_node", "Toggle Node"),
-        Binding("z", "collapse_all", "Collapse All"),
-        Binding("Z", "expand_all", "Expand All"),
-        Binding("s", "collapse_subtree", "Collapse Subtree"),
-        Binding("S", "expand_subtree", "Expand Subtree"),
-        Binding("T", "toggle_same_class", "Toggle Same Class Type"),
+        Binding("space", "toggle_node", "Toggle"),
+        Binding("z", "collapse_all", "Collapse"),
+        Binding("Z", "expand_all", "Expand"),
+        Binding("s", "collapse_subtree", "Collapse Sub"),
+        Binding("S", "expand_subtree", "Expand Sub"),
+        Binding("T", "toggle_same_class", "Toggle Class"),
         
         # Display options
-        Binding("t", "toggle_tensor_shapes", "Toggle Tensor Shapes"),
-        Binding("b", "toggle_node_sizes", "Toggle Node Sizes"),
-        Binding("i", "toggle_code_panel", "Toggle Code Panel"),
+        Binding("t", "toggle_tensor_shapes", "Shapes"),
+        Binding("b", "toggle_node_sizes", "Sizes"),
+        Binding("i", "toggle_code_panel", "Code"),
     ]
     
     def __init__(self, model=None):
