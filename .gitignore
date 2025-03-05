@@ -1,1 +1,16 @@
 textual
+
+
+#<RP Default Gitignore Start>
+*.pyc
+*.swo
+*.swp
+*.swn
+*.swm
+*.un~
+*.gstmp
+*.ipynb_checkpoints
+*.DS_Store
+#<RP Default Gitignore End>
+
+.original_instructions.py.un~
