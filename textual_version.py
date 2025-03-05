@@ -438,7 +438,7 @@ class ModelTreeViewer(App):
                     yield editor
                 
                 # Attributes section
-                yield Static("Object Attributes", id="attrs-title")
+                yield Static("Attributes: No Object Selected", id="attrs-title")
                 with Static(id="attrs-pane"):
                     yield Tree("No Object Selected")
                 
@@ -574,9 +574,78 @@ class ModelTreeViewer(App):
     
     # Remove the moved methods - now they're in AttributeTree class
     
+    def format_python_attribute_path(self, path_parts):
+        """Format a list of path parts into a valid Python attribute path
+        
+        Converts sequences like ["transformer_blocks", "8", "attn1"] into
+        proper Python syntax: "transformer_blocks[8].attn1"
+        
+        Args:
+            path_parts: List of path components
+            
+        Returns:
+            str: Properly formatted Python attribute path
+        """
+        processed_parts = []
+        i = 0
+        while i < len(path_parts):
+            part = path_parts[i]
+            
+            # Check if this part is followed by a numeric index
+            if i + 1 < len(path_parts) and path_parts[i + 1].isdigit():
+                # This part should have an index
+                index_part = path_parts[i + 1]
+                processed_parts.append(f"{part}[{index_part}]")
+                i += 2  # Skip the next part since we've incorporated it
+            else:
+                # Regular part (may be a digit or a name)
+                processed_parts.append(part)
+                i += 1
+        
+        # Join processed parts with dots
+        return ".".join(processed_parts)
+    
+    def get_module_path(self, module):
+        """Get a properly formatted Python path to a module in the model structure
+        
+        Args:
+            module: The module to get a path for
+            
+        Returns:
+            str: Python-style path to the module (e.g., "model.layers[0].attention")
+        """
+        # Try to find the node for this module
+        for node, node_data in self.node_data.items():
+            if node_data.module is module:
+                # Build the path from this node up to the root
+                path_parts = []
+                current = node
+                
+                while current and current != self.query_one("#tree-pane > Tree").root:
+                    # Get the node name - it's in parentheses in the label
+                    label = str(current.label)
+                    if "(" in label and ")" in label:
+                        name = label.split("(")[1].split(")")[0]
+                        path_parts.insert(0, name)
+                    current = current.parent
+                
+                # Format the path parts into proper Python attribute notation
+                if path_parts:
+                    return self.format_python_attribute_path(path_parts)
+        
+        # If we can't find a path, return the class name
+        return module.__class__.__name__
+    
     def build_attributes_tree(self, obj):
         """Build a tree of attributes for the given object"""
         attrs_tree = self.query_one("#attrs-pane > Tree")
+        attrs_title = self.query_one("#attrs-title")
+        
+        # Get the full path to the object
+        path = self.get_module_path(obj)
+        
+        # Update the attributes title directly
+        attrs_title.update(f"Attributes: {path}")
         
         # Create and use the AttributeTree helper class
         attribute_tree = AttributeTree(attrs_tree)
