@@ -143,19 +143,21 @@ class ModelTreeViewer(App):
         # Quit
         Binding("q", "quit", "Quit"),
         
-        # Navigation - vim style
+        # Navigation - vim style + arrow keys
         Binding("j", "cursor_down", "↓"),
         Binding("k", "cursor_up", "↑"),
         Binding("h", "cursor_left", "←"),
         Binding("l", "cursor_right", "→"),
+        Binding("down", "cursor_down", ""),
+        Binding("up", "cursor_up", ""),
+        Binding("left", "cursor_left", ""),
+        Binding("right", "cursor_right", ""),
         
         # Expand/Collapse
         Binding("space", "toggle_node", "Toggle"),
-        Binding("z", "collapse_all", "Collapse"),
-        Binding("Z", "expand_all", "Expand"),
-        Binding("s", "collapse_subtree", "Collapse Sub"),
-        Binding("S", "expand_subtree", "Expand Sub"),
-        Binding("T", "toggle_same_class", "Toggle Class"),
+        Binding("z", "toggle_all_folds", "Toggle All"),
+        Binding("s", "toggle_siblings", "Toggle Siblings"),
+        Binding("c", "toggle_same_class", "Toggle Class"),
         
         # Display options
         Binding("t", "toggle_tensor_shapes", "Shapes"),
@@ -437,45 +439,58 @@ class ModelTreeViewer(App):
         process_node(start_node)
         return count
     
-    def action_collapse_all(self) -> None:
-        """Collapse all nodes"""
-        tree = self.query_one(Tree)
-        self.process_nodes_recursively(tree.root, expand=False)
-        self.notify("All nodes collapsed")
-    
-    def action_expand_all(self) -> None:
-        """Expand all nodes"""
+    def action_toggle_all_folds(self) -> None:
+        """Toggle all nodes - collapse all if any are expanded, otherwise expand all"""
         tree = self.query_one(Tree)
         
-        # We need to do this in multiple passes to ensure all nodes get expanded
-        # Because expanding a node may create new children
-        for _ in range(10):  # Limit to 10 passes to avoid infinite loop
-            if self.process_nodes_recursively(tree.root, expand=True) == 0:
-                break
-                
-        self.notify("All nodes expanded")
+        # Check if any nodes are expanded
+        any_expanded = False
+        
+        def check_if_any_expanded(node):
+            nonlocal any_expanded
+            if node.is_expanded:
+                any_expanded = True
+                return True  # Stop traversal once we find an expanded node
+            for child in node.children:
+                if check_if_any_expanded(child):
+                    return True
+            return False
+        
+        check_if_any_expanded(tree.root)
+        
+        # If any nodes are expanded, collapse all, otherwise expand all
+        if any_expanded:
+            self.process_nodes_recursively(tree.root, expand=False)
+            self.notify("All nodes collapsed")
+        else:
+            # We need to do this in multiple passes to ensure all nodes get expanded
+            # Because expanding a node may create new children
+            for _ in range(10):  # Limit to 10 passes to avoid infinite loop
+                if self.process_nodes_recursively(tree.root, expand=True) == 0:
+                    break
+            self.notify("All nodes expanded")
     
-    def action_collapse_subtree(self) -> None:
-        """Collapse all nodes in the current subtree"""
+    def action_toggle_siblings(self) -> None:
+        """Toggle all sibling nodes at the same level as the cursor node"""
         tree = self.query_one(Tree)
-        if not tree.cursor_node:
+        if not tree.cursor_node or not tree.cursor_node.parent:
             return
             
-        count = self.process_nodes_recursively(tree.cursor_node, expand=False)
-        self.notify(f"Collapsed {count} nodes under {tree.cursor_node.label}")
-    
-    def action_expand_subtree(self) -> None:
-        """Expand all nodes in the current subtree"""
-        tree = self.query_one(Tree)
-        if not tree.cursor_node:
-            return
-            
-        # We may need multiple passes to fully expand all levels
-        for _ in range(10):  # Limit to 10 passes to avoid infinite loop
-            if self.process_nodes_recursively(tree.cursor_node, expand=True) == 0:
-                break
+        parent = tree.cursor_node.parent
+        current_node = tree.cursor_node
+        
+        # Check if current node is expanded to determine toggle direction
+        expand = not current_node.is_expanded
+        
+        # Toggle all siblings including the current node
+        count = 0
+        for sibling in parent.children:
+            if self.toggle_node_state(sibling, expand):
+                count += 1
                 
-        self.notify(f"Expanded subtree under {tree.cursor_node.label}")
+        action = "Expanded" if expand else "Collapsed"
+        self.notify(f"{action} {count} sibling nodes")
+        
     
     def process_nodes_by_type(self, start_node, target_type: str, expand: bool) -> int:
         """Process all nodes of a specific type in a subtree
