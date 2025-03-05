@@ -213,7 +213,7 @@ class ModelTreeViewer(App):
         Binding("t", "toggle_tensor_shapes", "Shapes"),
         Binding("b", "toggle_node_sizes", "Sizes"),
         Binding("i", "toggle_code_panel", "Code"),
-        Binding("r", "refresh_attrs", "Refresh Attributes"),
+        Binding("a", "toggle_attrs_panel", "Attributes"),
     ]
     
     def __init__(self, model=None):
@@ -231,6 +231,9 @@ class ModelTreeViewer(App):
         
         # Flag to track if code panel is visible
         self.code_panel_visible = True
+        
+        # Flag to track if attributes panel is visible
+        self.attrs_panel_visible = True
         
         # Use a built-in theme for the editor
         self.editor_theme = TextAreaTheme.get_builtin_theme("vscode_dark")
@@ -274,6 +277,9 @@ class ModelTreeViewer(App):
         # Initialize attributes tree
         attrs_tree = self.query_one("#attrs-pane > Tree")
         attrs_tree.root.expand()
+        
+        # Initialize panel layout
+        self.update_panel_layout()
         
         # Populate the tree if we have a model
         if self.model:
@@ -544,6 +550,11 @@ class ModelTreeViewer(App):
         if not node:
             return False
             
+        # For nodes that don't allow expansion (leaf nodes), we still want to
+        # count them as processed for sibling operations
+        if not node.allow_expand:
+            return True
+            
         if expand is None:
             # Toggle current state
             if node.is_expanded:
@@ -630,8 +641,18 @@ class ModelTreeViewer(App):
         parent = tree.cursor_node.parent
         current_node = tree.cursor_node
         
-        # Check if current node is expanded to determine toggle direction
-        expand = not current_node.is_expanded
+        # Determine toggle direction based on node type
+        if current_node.allow_expand:
+            # For expandable nodes, use their current state
+            expand = not current_node.is_expanded
+        else:
+            # For leaf nodes (not expandable), check siblings to determine direction
+            # Default to expanding if there's no expandable sibling
+            expand = True
+            for sibling in parent.children:
+                if sibling.allow_expand:
+                    expand = not sibling.is_expanded
+                    break
         
         # Toggle all siblings including the current node
         count = 0
@@ -639,7 +660,7 @@ class ModelTreeViewer(App):
             if self.toggle_node_state(sibling, expand):
                 count += 1
                 
-        action = "Expanded" if expand else "Collapsed"
+        action = "Processed" if expand else "Collapsed"
         self.notify(f"{action} {count} sibling nodes")
         
     
@@ -731,34 +752,68 @@ class ModelTreeViewer(App):
         status = "Showing" if self.show_node_sizes else "Hiding"
         self.notify(f"{status} node sizes")
         
-    def action_refresh_attrs(self) -> None:
-        """Refresh the attributes tree for the current module"""
-        if self.cursor_node and self.cursor_node in self.node_data:
-            module = self.node_data[self.cursor_node].module
-            if module is not None:
-                self.build_attributes_tree(module)
-                self.notify("Refreshed attributes")
+    def action_toggle_attrs_panel(self) -> None:
+        """Toggle visibility of the attributes panel"""
+        # Get attributes pane and code editor
+        attrs_pane = self.query_one("#attrs-pane")
+        attrs_title = self.query_one("#attrs-title")
+        code_editor = self.query_one("#code-editor")
+        
+        # Toggle attributes panel visibility flag
+        self.attrs_panel_visible = not self.attrs_panel_visible
+        
+        # Update layout based on which panels are visible
+        self.update_panel_layout()
     
     def action_toggle_code_panel(self) -> None:
         """Toggle visibility of the code panel"""
+        # Toggle code panel visibility flag
         self.code_panel_visible = not self.code_panel_visible
         
-        # Get the editor pane
+        # Update layout based on which panels are visible
+        self.update_panel_layout()
+    
+    def update_panel_layout(self) -> None:
+        """Update the layout based on which panels are visible"""
+        # Get all the relevant panes
         editor_pane = self.query_one("#editor-pane")
         tree_pane = self.query_one("#tree-pane")
+        code_editor = self.query_one("#code-editor")
+        attrs_pane = self.query_one("#attrs-pane")
+        attrs_title = self.query_one("#attrs-title")
         
-        if self.code_panel_visible:
-            # Show the code panel
-            editor_pane.styles.width = "60%"
-            tree_pane.styles.width = "40%"
-            editor_pane.display = True
-        else:
-            # Hide the code panel - give full width to tree
+        # Handle visibility of the entire right panel
+        if not self.code_panel_visible and not self.attrs_panel_visible:
+            # Hide the entire right panel
             editor_pane.display = False
             tree_pane.styles.width = "100%"
+            return
         
-        status = "Showing" if self.code_panel_visible else "Hiding"
-        self.notify(f"{status} code panel")
+        # Show the right panel
+        editor_pane.display = True
+        editor_pane.styles.width = "60%"
+        tree_pane.styles.width = "40%"
+        
+        # Handle code editor visibility
+        if self.code_panel_visible:
+            code_editor.display = True
+            if self.attrs_panel_visible:
+                # Both panels visible
+                code_editor.styles.height = "2fr"
+            else:
+                # Only code panel visible
+                code_editor.styles.height = "1fr"
+        else:
+            code_editor.display = False
+        
+        # Handle attributes panel visibility
+        if self.attrs_panel_visible:
+            attrs_pane.display = True
+            attrs_title.display = True
+            attrs_pane.styles.height = "1fr"
+        else:
+            attrs_pane.display = False
+            attrs_title.display = False
 
 
 
