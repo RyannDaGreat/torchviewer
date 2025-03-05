@@ -799,12 +799,13 @@ class ModelTreeViewer(App):
         """Toggle all nodes - collapse all if any are expanded, otherwise expand all"""
         tree = self.query_one(Tree)
         
-        # Check if any nodes are expanded
+        # Check if any nodes are expanded (excluding the root node)
         any_expanded = False
         
         def check_if_any_expanded(node):
             nonlocal any_expanded
-            if node.is_expanded:
+            # Skip the root node itself in the check
+            if node != tree.root and node.is_expanded:
                 any_expanded = True
                 return True  # Stop traversal once we find an expanded node
             for child in node.children:
@@ -814,10 +815,12 @@ class ModelTreeViewer(App):
         
         check_if_any_expanded(tree.root)
         
-        # If any nodes are expanded, collapse all, otherwise expand all
+        # If any nodes are expanded, collapse all (except root), otherwise expand all
         if any_expanded:
-            self.process_nodes_recursively(tree.root, expand=False)
-            self.notify("All nodes collapsed")
+            # Process children of root node individually to avoid collapsing root
+            for child in tree.root.children:
+                self.process_nodes_recursively(child, expand=False)
+            self.notify("All nodes collapsed (except root)")
         else:
             # We need to do this in multiple passes to ensure all nodes get expanded
             # Because expanding a node may create new children
