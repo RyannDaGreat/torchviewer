@@ -1,21 +1,27 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Tree, Footer
+from textual.widgets import Tree, Footer, Static
 from textual.binding import Binding
+from textual.containers import Horizontal
+from textual.widgets._text_area import TextArea
+from textual._text_area_theme import TextAreaTheme
 import diffusers
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Tuple
 import torch
 from rich.text import Text
 from rich.pretty import Pretty
 from rich.console import Console
+from rich.style import Style
 from io import StringIO
+import inspect
 
 class ModuleNode:
     """Node representing a PyTorch module"""
-    def __init__(self, name: str, module_type: str, extra_info: str = "", state_dict_info: str = ""):
+    def __init__(self, name: str, module_type: str, extra_info: str = "", state_dict_info: str = "", module=None):
         self.name = name
         self.module_type = module_type
         self.extra_info = extra_info
         self.state_dict_info = state_dict_info
+        self.module = module
 
     def get_label(self, show_tensor_shapes=True) -> str:
         """Get the display label for this node"""
@@ -45,10 +51,31 @@ class ModelTreeViewer(App):
     """Textual app to display a PyTorch model structure as a tree with folding"""
     
     CSS = """
+    #main-container {
+        layout: horizontal;
+        height: 100%;
+    }
+    
+    #tree-pane {
+        width: 40%;
+        height: 100%;
+        border-right: solid gray;
+    }
+    
+    #editor-pane {
+        width: 60%;
+        height: 100%;
+    }
+    
     Tree {
         width: 100%;
         height: 100%;
         overflow-x: auto;  /* Allow horizontal scrolling */
+    }
+    
+    TextArea {
+        width: 100%;
+        height: 100%;
     }
     
     .tensor-shape {
@@ -92,17 +119,38 @@ class ModelTreeViewer(App):
         
         # Flag to control whether to show tensor shapes
         self.show_tensor_shapes = True
+        
+        # Use a built-in theme for the editor
+        self.editor_theme = TextAreaTheme.get_builtin_theme("vscode_dark")
     
     def compose(self) -> ComposeResult:
-        """Compose the UI"""
-        yield Tree("Model Structure")
+        """Compose the UI with two panes"""
+        with Horizontal(id="main-container"):
+            # Left pane with tree view
+            with Static(id="tree-pane"):
+                yield Tree("Model Structure")
+            
+            # Right pane with code editor
+            with Static(id="editor-pane"):
+                editor = TextArea(language="python", read_only=True)
+                # We'll register the theme after the widget is mounted
+                yield editor
+                
         yield Footer()
     
     def on_mount(self) -> None:
-        """Populate the tree when app is mounted"""
+        """Set up the UI when app is mounted"""
+        # Set up the tree
         tree = self.query_one(Tree)
         tree.root.expand()
         
+        # Register theme with editor
+        editor = self.query_one(TextArea)
+        if self.editor_theme:
+            editor.register_theme(self.editor_theme)
+            editor.theme = "vscode_dark"
+        
+        # Populate the tree if we have a model
         if self.model:
             self.populate_tree(self.model, tree.root)
     
@@ -137,7 +185,9 @@ class ModelTreeViewer(App):
             else:
                 node_name = node_label
         
-        node_data = ModuleNode(node_name, module_name, extra_info, state_dict_info)
+        node_data = ModuleNode(name=node_name, module_type=module_name, 
+                              extra_info=extra_info, state_dict_info=state_dict_info, 
+                              module=module)
         self.node_data[tree_node] = node_data
         
         # Set node display text
@@ -160,6 +210,32 @@ class ModelTreeViewer(App):
             child_node = tree_node.add(formatted_label)
             self.populate_tree(child_module, child_node)
     
+    def on_tree_node_selected(self, event) -> None:
+        """Handle tree node selection to update the editor"""
+        node = event.node
+        if node in self.node_data:
+            module = self.node_data[node].module
+            if module is not None:
+                self.update_editor_with_module(module)
+    
+    def update_editor_with_module(self, module) -> None:
+        """Update the editor with module source code"""
+        editor = self.query_one(TextArea)
+        
+        try:
+            # Get source code for the module class
+            source = inspect.getsource(module.__class__)
+            line_number = inspect.getsourcelines(module.__class__)[1]
+            
+            # Set the content in the editor
+            editor.text = source
+            
+            # Move cursor to the class definition line
+            editor.move_cursor((line_number-1, 0))
+            
+        except (TypeError, OSError) as e:
+            # Handle case where source isn't available (built-in modules, etc.)
+            editor.text = f"# Source code not available for {module.__class__.__name__}\n# {str(e)}"
     
     def action_cursor_down(self) -> None:
         """Move cursor down (j key)"""
@@ -187,6 +263,10 @@ class ModelTreeViewer(App):
         node = tree.cursor_node
         if node and not node.is_expanded and node.allow_expand:
             node.expand()  # Use node.expand() directly
+        elif node:
+            # When pressing right on a selected node, update the editor
+            if node in self.node_data and self.node_data[node].module:
+                self.update_editor_with_module(self.node_data[node].module)
     
     def toggle_node_state(self, node, expand: Optional[bool] = None) -> bool:
         """Toggle or set a node's expand/collapse state
