@@ -19,10 +19,8 @@ class ModuleNode:
             node_text = self.module_type
             
         if self.extra_info:
-            if len(self.extra_info) > 30:  # Truncate long extra info
-                node_text += f"({self.extra_info[:30]}...)"
-            else:
-                node_text += f"({self.extra_info})"
+            # Don't truncate the extra info anymore
+            node_text += f"({self.extra_info})"
                 
         return node_text
 
@@ -33,6 +31,7 @@ class ModelTreeViewer(App):
     Tree {
         width: 100%;
         height: 100%;
+        overflow-x: auto;  /* Allow horizontal scrolling */
     }
     """
     
