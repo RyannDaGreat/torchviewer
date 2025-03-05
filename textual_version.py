@@ -51,8 +51,7 @@ class ModelTreeViewer(App):
         Binding("Z", "expand_all", "Expand All"),
         Binding("s", "collapse_subtree", "Collapse Subtree"),
         Binding("S", "expand_subtree", "Expand Subtree"),
-        Binding("t", "toggle_same_name_subtree", "Toggle Same Name in Subtree"),
-        Binding("T", "toggle_same_name_all", "Toggle Same Name Everywhere"),
+        Binding("T", "toggle_same_class", "Toggle Same Class Type"),
     ]
     
     def __init__(self, model=None):
@@ -135,29 +134,69 @@ class ModelTreeViewer(App):
         if node and not node.is_expanded and node.allow_expand:
             node.expand()  # Use node.expand() directly
     
+    def toggle_node_state(self, node, expand: Optional[bool] = None) -> bool:
+        """Toggle or set a node's expand/collapse state
+        
+        Args:
+            node: The tree node to toggle
+            expand: If True, expand; if False, collapse; if None, toggle current state
+            
+        Returns:
+            True if action was performed, False otherwise
+        """
+        if not node:
+            return False
+            
+        if expand is None:
+            # Toggle current state
+            if node.is_expanded:
+                node.collapse()
+                return True
+            elif node.allow_expand:
+                node.expand()
+                return True
+        elif expand and not node.is_expanded and node.allow_expand:
+            node.expand()
+            return True
+        elif not expand and node.is_expanded:
+            node.collapse()
+            return True
+            
+        return False
+    
     def action_toggle_node(self) -> None:
         """Toggle expand/collapse of selected node"""
         tree = self.query_one(Tree)
-        node = tree.cursor_node
-        if node:
-            if node.is_expanded:
-                node.collapse()  # Use node.collapse() directly
-            elif node.allow_expand:
-                node.expand()  # Use node.expand() directly
+        self.toggle_node_state(tree.cursor_node)
+    
+    def process_nodes_recursively(self, start_node, expand: Optional[bool], subtree_only: bool = False) -> int:
+        """Process nodes recursively to expand or collapse them
+        
+        Args:
+            start_node: The node to start processing from
+            expand: If True, expand nodes; if False, collapse nodes
+            subtree_only: If True, only process the subtree under start_node
+            
+        Returns:
+            Number of nodes processed
+        """
+        count = 0
+        
+        def process_node(node):
+            nonlocal count
+            if self.toggle_node_state(node, expand):
+                count += 1
+            for child in node.children:
+                process_node(child)
+                
+        # Start processing from specified node
+        process_node(start_node)
+        return count
     
     def action_collapse_all(self) -> None:
         """Collapse all nodes"""
         tree = self.query_one(Tree)
-        
-        # We can't use walk_tree - use a recursive function instead
-        def collapse_all_nodes(node):
-            if hasattr(node, "is_expanded") and node.is_expanded:
-                node.collapse()  # Use node.collapse() directly
-            for child in node.children:
-                collapse_all_nodes(child)
-        
-        # Start from the root
-        collapse_all_nodes(tree.root)
+        self.process_nodes_recursively(tree.root, expand=False)
         self.notify("All nodes collapsed")
     
     def action_expand_all(self) -> None:
@@ -166,25 +205,8 @@ class ModelTreeViewer(App):
         
         # We need to do this in multiple passes to ensure all nodes get expanded
         # Because expanding a node may create new children
-        def expand_pass():
-            # Keep track of whether we expanded anything this pass
-            expanded = False
-            
-            def expand_nodes(node):
-                nonlocal expanded
-                if hasattr(node, "is_expanded") and not node.is_expanded and node.allow_expand:
-                    node.expand()  # Use node.expand() directly
-                    expanded = True
-                for child in node.children:
-                    expand_nodes(child)
-                    
-            # Start from the root
-            expand_nodes(tree.root)
-            return expanded
-        
-        # Run multiple passes until no more expansions occur
         for _ in range(10):  # Limit to 10 passes to avoid infinite loop
-            if not expand_pass():
+            if self.process_nodes_recursively(tree.root, expand=True) == 0:
                 break
                 
         self.notify("All nodes expanded")
@@ -195,22 +217,8 @@ class ModelTreeViewer(App):
         if not tree.cursor_node:
             return
             
-        # Start from the current node
-        current_node = tree.cursor_node
-        
-        # Function to recursively collapse a node and all its children
-        def collapse_recursive(node):
-            if hasattr(node, "is_expanded") and node.is_expanded:
-                node.collapse()  # Use node.collapse() directly
-            
-            # Now collapse all children
-            for child in node.children:
-                collapse_recursive(child)
-        
-        # Start collapsing from the current node
-        collapse_recursive(current_node)
-                
-        self.notify(f"Collapsed subtree under {current_node.label}")
+        count = self.process_nodes_recursively(tree.cursor_node, expand=False)
+        self.notify(f"Collapsed {count} nodes under {tree.cursor_node.label}")
     
     def action_expand_subtree(self) -> None:
         """Expand all nodes in the current subtree"""
@@ -218,102 +226,58 @@ class ModelTreeViewer(App):
         if not tree.cursor_node:
             return
             
-        # Start from the current node
-        current_node = tree.cursor_node
-        
-        # Function to recursively expand a node and all its children
-        def expand_recursive(node):
-            if hasattr(node, "is_expanded") and not node.is_expanded and node.allow_expand:
-                node.expand()  # Use node.expand() directly
-            
-            # Now expand all children
-            for child in node.children:
-                expand_recursive(child)
-        
-        # Start expanding from the current node
-        expand_recursive(current_node)
-        
-        self.notify(f"Expanded subtree under {current_node.label}")
+        # We may need multiple passes to fully expand all levels
+        for _ in range(10):  # Limit to 10 passes to avoid infinite loop
+            if self.process_nodes_recursively(tree.cursor_node, expand=True) == 0:
+                break
+                
+        self.notify(f"Expanded subtree under {tree.cursor_node.label}")
     
-    def action_toggle_same_name_subtree(self) -> None:
-        """Toggle all nodes with the same name in the current subtree"""
-        tree = self.query_one(Tree)
-        if not tree.cursor_node:
-            return
-            
-        current_node = tree.cursor_node
-        if current_node not in self.node_data:
-            return
-            
-        # Get the node type we're looking for
-        target_module_type = self.node_data[current_node].module_type
+    def process_nodes_by_type(self, start_node, target_type: str, expand: bool) -> int:
+        """Process all nodes of a specific type in a subtree
         
-        # Get current expand state to toggle
-        expand = not current_node.is_expanded
-        
-        # Find all nodes in the subtree with the same module type
+        Args:
+            start_node: Node to start processing from
+            target_type: Module type to match
+            expand: Whether to expand (True) or collapse (False)
+            
+        Returns:
+            Number of nodes processed
+        """
         count = 0
         
-        def process_subtree(node):
+        def process_node(node):
             nonlocal count
-            # Check if this node matches
-            if node in self.node_data and self.node_data[node].module_type == target_module_type:
-                if expand and hasattr(node, "is_expanded") and not node.is_expanded and node.allow_expand:
-                    node.expand()  # Use node.expand() directly
-                    count += 1
-                elif not expand and hasattr(node, "is_expanded") and node.is_expanded:
-                    node.collapse()  # Use node.collapse() directly
+            # Check if this node matches the target type
+            if node in self.node_data and self.node_data[node].module_type == target_type:
+                if self.toggle_node_state(node, expand):
                     count += 1
             
             # Process all children
             for child in node.children:
-                process_subtree(child)
+                process_node(child)
         
-        # Start from current node
-        process_subtree(current_node)
-        
-        action = "Expanded" if expand else "Collapsed"
-        self.notify(f"{action} {count} nodes of type {target_module_type} in subtree")
+        # Start from specified node
+        process_node(start_node)
+        return count
     
-    def action_toggle_same_name_all(self) -> None:
-        """Toggle all nodes with the same name in the entire tree"""
+    def action_toggle_same_class(self) -> None:
+        """Toggle all nodes with the same class type in the entire tree"""
         tree = self.query_one(Tree)
-        if not tree.cursor_node:
+        if not tree.cursor_node or tree.cursor_node not in self.node_data:
             return
             
         current_node = tree.cursor_node
-        if current_node not in self.node_data:
-            return
-            
-        # Get the node type we're looking for
         target_module_type = self.node_data[current_node].module_type
         
-        # Get current expand state to toggle
+        # Toggle based on current node's state
         expand = not current_node.is_expanded
         
-        # Find all nodes in the entire tree with the same module type
-        count = 0
-        
-        def process_tree(node):
-            nonlocal count
-            # Check if this node matches
-            if node in self.node_data and self.node_data[node].module_type == target_module_type:
-                if expand and hasattr(node, "is_expanded") and not node.is_expanded and node.allow_expand:
-                    node.expand()  # Use node.expand() directly
-                    count += 1
-                elif not expand and hasattr(node, "is_expanded") and node.is_expanded:
-                    node.collapse()  # Use node.collapse() directly
-                    count += 1
-            
-            # Process all children
-            for child in node.children:
-                process_tree(child)
-        
-        # Start from root
-        process_tree(tree.root)
+        # Process nodes of the same type in the entire tree
+        count = self.process_nodes_by_type(tree.root, target_module_type, expand)
         
         action = "Expanded" if expand else "Collapsed"
-        self.notify(f"{action} {count} nodes of type {target_module_type} in entire tree")
+        self.notify(f"{action} {count} nodes of class {target_module_type}")
     
 
 
