@@ -478,8 +478,8 @@ class ModelTreeViewer(App):
         node.set_classes(node_classes)
 
 
-class SearchScreen(ModalScreen[str]):
-    """Modal screen for searching the tree"""
+class SearchScreen(Screen):
+    """Screen for searching the tree"""
     
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
@@ -503,17 +503,17 @@ class SearchScreen(ModalScreen[str]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         # Called when user presses Enter in the input field
         self.on_search(event.value)
-        self.app.pop_screen()
+        self.dismiss()  # Close the screen
     
     def action_cancel(self) -> None:
         # Called when user presses Escape
-        self.app.pop_screen()
+        self.dismiss()  # Close the screen
     
     def action_submit(self) -> None:
         # Called when user presses Enter with the screen focused
         input_value = self.query_one(Input).value
         self.on_search(input_value)
-        self.app.pop_screen()
+        self.dismiss()  # Close the screen
 
 
 def explore_module(module):
