@@ -32,6 +32,7 @@ That prints out this:
 
 Make a textual library tree explorer app so I can fold this model interactily and view it 
 I want to be able to fold and unfold regions here. And would be nice to have highlighting too! See how I made one part blue for example?
+/opt/homebrew/opt/python@3.10/bin/python3.10 is for testing
 
 Linear(
 
