@@ -108,6 +108,7 @@ class ModelTreeViewer(App):
         
         # Display options
         Binding("t", "toggle_tensor_shapes", "Toggle Tensor Shapes"),
+        Binding("i", "toggle_code_panel", "Toggle Code Panel"),
     ]
     
     def __init__(self, model=None):
@@ -119,6 +120,9 @@ class ModelTreeViewer(App):
         
         # Flag to control whether to show tensor shapes
         self.show_tensor_shapes = True
+        
+        # Flag to track if code panel is visible
+        self.code_panel_visible = True
         
         # Use a built-in theme for the editor
         self.editor_theme = TextAreaTheme.get_builtin_theme("vscode_dark")
@@ -430,6 +434,27 @@ class ModelTreeViewer(App):
         
         status = "Showing" if self.show_tensor_shapes else "Hiding"
         self.notify(f"{status} tensor shapes")
+        
+    def action_toggle_code_panel(self) -> None:
+        """Toggle visibility of the code panel"""
+        self.code_panel_visible = not self.code_panel_visible
+        
+        # Get the editor pane
+        editor_pane = self.query_one("#editor-pane")
+        tree_pane = self.query_one("#tree-pane")
+        
+        if self.code_panel_visible:
+            # Show the code panel
+            editor_pane.styles.width = "60%"
+            tree_pane.styles.width = "40%"
+            editor_pane.display = True
+        else:
+            # Hide the code panel - give full width to tree
+            editor_pane.display = False
+            tree_pane.styles.width = "100%"
+        
+        status = "Showing" if self.code_panel_visible else "Hiding"
+        self.notify(f"{status} code panel")
 
 
 
