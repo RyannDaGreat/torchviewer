@@ -1,11 +1,8 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Tree, Footer, Input
+from textual.widgets import Tree, Footer
 from textual.binding import Binding
-from textual.containers import Container
-from textual.screen import Screen, ModalScreen
 import diffusers
-from typing import Dict, Optional, Any, Callable
-import re
+from typing import Dict, Optional, Any
 
 class ModuleNode:
     """Node representing a PyTorch module"""
@@ -13,7 +10,6 @@ class ModuleNode:
         self.name = name
         self.module_type = module_type
         self.extra_info = extra_info
-        self.highlight_color = None
 
     def get_label(self) -> str:
         """Get the display label for this node"""
@@ -38,44 +34,6 @@ class ModelTreeViewer(App):
         width: 100%;
         height: 100%;
     }
-    
-    .node-blue {
-        color: blue;
-    }
-    
-    .node-green {
-        color: green;
-    }
-    
-    .node-yellow {
-        color: yellow;
-    }
-    
-    .node-red {
-        color: red;
-    }
-    
-    .node-cyan {
-        color: cyan;
-    }
-    
-    .node-magenta {
-        color: magenta;
-    }
-    
-    #search-container {
-        width: 60%;
-        height: auto;
-        background: $surface;
-        padding: 1 2;
-        margin: 1 2;
-        box-sizing: border-box;
-    }
-    
-    Input {
-        width: 100%;
-        margin: 1 0;
-    }
     """
     
     BINDINGS = [
@@ -87,14 +45,6 @@ class ModelTreeViewer(App):
         Binding("k", "cursor_up", "Up"),
         Binding("h", "cursor_left", "Left"),
         Binding("l", "cursor_right", "Right"),
-        
-        # Search
-        Binding("/", "find", "Find"),
-        Binding("n", "find_next", "Next Match"),
-        Binding("p", "find_prev", "Prev Match"),
-        
-        # Coloring
-        Binding("c", "cycle_color", "Cycle Color"),
         
         # Expand/Collapse
         Binding("space", "toggle_node", "Toggle Node"),
@@ -109,8 +59,6 @@ class ModelTreeViewer(App):
     def __init__(self, model=None):
         super().__init__()
         self.model = model
-        self.search_results = []
-        self.current_search_idx = -1
         
         # Cache node_data for each tree node
         self.node_data: Dict[Any, ModuleNode] = {}
@@ -160,85 +108,6 @@ class ModelTreeViewer(App):
             child_node = tree_node.add(f"({key}): {child_module._get_name()}")
             self.populate_tree(child_module, child_node)
     
-    def action_find(self) -> None:
-        """Prompt for search string"""
-        try:
-            self.push_screen(SearchScreen(self.search_in_tree))
-        except Exception as e:
-            self.notify(f"Search error: {str(e)}", severity="error")
-    
-    def search_in_tree(self, search_text: str) -> None:
-        """Search for nodes matching the given text"""
-        if not search_text:
-            return
-        
-        try:
-            tree = self.query_one(Tree)
-            self.search_results = []
-            pattern = re.compile(search_text, re.IGNORECASE)
-            
-            # Helper function to search recursively
-            def search_node(node):
-                if node in self.node_data:
-                    node_data = self.node_data[node]
-                    text = f"{node_data.name} {node_data.module_type} {node_data.extra_info}"
-                    if pattern.search(text):
-                        self.search_results.append(node)
-                
-                # Search children
-                for child in node.children:
-                    search_node(child)
-            
-            # Start search from root
-            search_node(tree.root)
-            
-            # Jump to first result
-            if self.search_results:
-                self.current_search_idx = 0
-                self.goto_search_result()
-                self.notify(f"Found {len(self.search_results)} matches")
-            else:
-                self.notify(f"No matches for '{search_text}'")
-        except Exception as e:
-            self.notify(f"Search error: {str(e)}", severity="error")
-    
-    def action_find_next(self) -> None:
-        """Go to next search result"""
-        if not self.search_results:
-            self.notify("No search results")
-            return
-            
-        self.current_search_idx = (self.current_search_idx + 1) % len(self.search_results)
-        self.goto_search_result()
-        self.notify(f"Match {self.current_search_idx + 1}/{len(self.search_results)}")
-        
-    def action_find_prev(self) -> None:
-        """Go to previous search result"""
-        if not self.search_results:
-            self.notify("No search results")
-            return
-            
-        self.current_search_idx = (self.current_search_idx - 1) % len(self.search_results)
-        self.goto_search_result()
-        self.notify(f"Match {self.current_search_idx + 1}/{len(self.search_results)}")
-    
-    def goto_search_result(self) -> None:
-        """Jump to the current search result"""
-        if not self.search_results or self.current_search_idx < 0:
-            return
-            
-        node = self.search_results[self.current_search_idx]
-        
-        # Expand all parent nodes
-        parent = node.parent
-        while parent:
-            parent.expand()
-            parent = parent.parent
-        
-        # Select the node
-        tree = self.query_one(Tree)
-        tree.select_node(node)
-        tree.scroll_to_node(node)
     
     def action_cursor_down(self) -> None:
         """Move cursor down (j key)"""
@@ -447,73 +316,8 @@ class ModelTreeViewer(App):
         action = "Expanded" if expand else "Collapsed"
         self.notify(f"{action} {count} nodes of type {target_module_type} in entire tree")
     
-    def action_cycle_color(self) -> None:
-        """Cycle highlight color of selected node"""
-        tree = self.query_one(Tree)
-        if not tree.cursor_node:
-            return
-            
-        node = tree.cursor_node
-        if node not in self.node_data:
-            return
-            
-        node_data = self.node_data[node]
-        colors = [None, "blue", "green", "yellow", "red", "cyan", "magenta"]
-        
-        # Get current color index
-        current_idx = 0
-        if node_data.highlight_color in colors:
-            current_idx = colors.index(node_data.highlight_color)
-        
-        # Cycle to next color
-        next_idx = (current_idx + 1) % len(colors)
-        node_data.highlight_color = colors[next_idx]
-        
-        # Remove all color classes - use set_classes instead
-        node_classes = set()
-        if node_data.highlight_color:
-            node_classes.add(f"node-{node_data.highlight_color}")
-            
-        # Apply the classes
-        node.set_classes(node_classes)
 
 
-class SearchScreen(Screen):
-    """Screen for searching the tree"""
-    
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("enter", "submit", "Search"),
-    ]
-    
-    def __init__(self, on_search: Callable[[str], None]):
-        super().__init__()
-        self.on_search = on_search
-    
-    def compose(self) -> ComposeResult:
-        yield Container(
-            Input(placeholder="Enter search text..."),
-            id="search-container"
-        )
-    
-    def on_mount(self) -> None:
-        # Focus the input when the screen appears
-        self.query_one(Input).focus()
-    
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        # Called when user presses Enter in the input field
-        self.on_search(event.value)
-        self.dismiss()  # Close the screen
-    
-    def action_cancel(self) -> None:
-        # Called when user presses Escape
-        self.dismiss()  # Close the screen
-    
-    def action_submit(self) -> None:
-        # Called when user presses Enter with the screen focused
-        input_value = self.query_one(Input).value
-        self.on_search(input_value)
-        self.dismiss()  # Close the screen
 
 
 def explore_module(module):
